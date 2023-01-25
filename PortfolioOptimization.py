@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import pandas_datareader as pdr
+import yfinance as yf
 from pandas_datareader import data as web
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -20,6 +22,7 @@ pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', None)
 
 plt.style.use("fivethirtyeight")
+
 
 def method_1():
     #get the tickers
@@ -98,8 +101,8 @@ def method_1():
     percent_var = str(round(port_variance, 4) * 100) + "%"
     percent_vol = str(round(port_volatility, 4) * 100) + "%"
     percent_ret = str(round(portfolio_simple_annual_return, 4) * 100) + "%"
-    print("Expected annual return: ", percent_ret)
     print("Annual Volatility: ", percent_vol)
+    print("Expected annual return: ", percent_ret)
     print("Annual Variance: ", percent_var)
 
 
@@ -124,27 +127,64 @@ def method_1():
     print("Funds remaining: ${:.2f}".format(leftover))
 
 
-def method_2():
-    #1. get data
-    #
-    listStocks = ["ALICORC1", "IFS", "MINSURI1", "FERREYC1", "INRETC1"]
+def get_tickers(exchange):
+    listStocks = []
+    ticker = "X"
+
+    if exchange != "BVL":
+        while ticker != "":
+            ticker = input("Enter ticker: ")
+
+            if ticker != "":
+                listStocks.append(ticker)
+    else:
+        listStocks = ["ALICORC1", "IFS", "MINSURI1", "FERREYC1", "INRETC1"]
+
+    return listStocks
+
+
+def get_stock_prices(exchange):
+    start_date = "2017-01-01"
+    end_date = "2022-12-31"
     df = pd.DataFrame()
+    listStocks = get_tickers(exchange)
 
     for stock in listStocks:
-        tempDf = pd.read_csv("BVL_" + stock + ".csv")
-        tempDf = tempDf.drop(columns=["Apertura", "Cierre",
-            "Máximo", "Mínimo", "Promedio", "Cantidad negociada",
-            "Monto negociado", "Fecha anterior"])
-        tempDf.columns = ["Date", stock]
-        tempDf = tempDf.set_index("Date")
+        if exchange == "BVL":
+            tempDf = pd.read_csv("BVL_" + stock + ".csv")
+            tempDf = tempDf.drop(columns=["Apertura", "Cierre",
+                "Máximo", "Mínimo", "Promedio", "Cantidad negociada",
+                "Monto negociado", "Fecha anterior"])
+            tempDf.columns = ["Date", stock]
+            tempDf = tempDf.set_index("Date")
+        else:
+            tempDf = yf.download(stock, start_date, end_date)
+            #tempDf = web.DataReader(stock, start_date, end_date)
+            tempDf = tempDf.drop(columns=["Open", "High",
+                "Low", "Close", "Volume"])
+            tempDf.columns = [stock]
+            #print(tempDf)
 
         if len(df.columns) == 0:
             df = tempDf
         else:
             df = df.join(tempDf)
 
-    df = df.iloc[::-1]
-    print(df)
+    return df, listStocks
+
+
+def convert_percentage(value):
+    percentage = str(value) + "%"
+    return percentage
+
+
+def method_2(exchange):
+    #1. get data
+    #df = pd.DataFrame()
+    df, listStocks = get_stock_prices(exchange)
+    #df = df.iloc[::-1]
+    print(df.head())
+
 
     #2. get returns
     nr_observations = len(df)
@@ -152,55 +192,59 @@ def method_2():
     daily_returns = df.pct_change()
     #daily_returns = df.pct_change().apply(lambda x: np.log(1+x))
     daily_returns = daily_returns #* 100
-    print("\n")
-    print(daily_returns)
+    print("\nDaily return:\n")
+    print(daily_returns.head())
     #print(daily_returns.iloc[0:10])
     #print((daily_returns * 100).iloc[0:10])
 
     #3. expected return, std, variance, covariance
-    yearly_return = daily_returns.mean() * nr_trading_days_year
+    temp = daily_returns
+    #temp = temp.reset_index()
+    #temp["Month"] = pd.to_datetime(temp["Date"]).dt.month
+    #print(temp.head())
+    temp = temp.groupby(by=[temp.index.year, temp.index.month]).mean()
+
+    for stock in listStocks:
+        temp["Monthly_" + stock] = temp[stock] + 1
+
+    #print(len(temp))
+    print(temp)
+
+    yearly_return = daily_returns.mean() * nr_trading_days_year * 100
     average_return = daily_returns.mean()
-    standar_deviation = daily_returns.std()
+    standar_deviation = daily_returns.std() * 100
     variance = daily_returns.var()
-    sharpe_ratio = average_return/standar_deviation
+    sharpe_ratio = yearly_return/standar_deviation
     covariance = daily_returns.cov()
     correlation = daily_returns.corr()
 
-    # yearly_return = pd.DataFrame(yearly_return)
-    # yearly_return.columns = ["Value"]
-    #
-    # standar_deviation = pd.DataFrame(standar_deviation)
-    # standar_deviation.columns = ["Value"]
-    #
-    # variance = pd.DataFrame(variance)
-    # variance.columns = ["Value"]
-    #
-    # sharpe_ratio = pd.DataFrame(sharpe_ratio)
-    # sharpe_ratio.columns = ["Value"]
-
-    print("\nExpected yearly return:\n", yearly_return.T)
-    print("\nStandar deviation:\n", standar_deviation.T)
-    print("\nVariance:\n", variance.T)
-    print("\nSharpe ratio:\n", sharpe_ratio.T)
-    print("\nCovariance:\n", covariance)
+    #print(monthly_mean_return)
+    print("\nExpected yearly return:\n", yearly_return)
+    print("\nStandar deviation:\n", standar_deviation)
+    print("\nVariance:\n", variance)
+    print("\nSharpe ratio:\n", sharpe_ratio)
+    #print("\nCovariance:\n", covariance)
     #print("\nCorrelation:\n", correlation)
 
-    #4. portfolio weights
+    #4. equally distributed portfolio
     portfolio_weight = [1.0/len(listStocks)] * len(listStocks)
     assets = pd.concat([yearly_return, standar_deviation], axis=1)
     assets.columns = ["Returns", "Volatility"]
-    #print(portfolio_weight)
+    print("\nRisk vs Return -> Port. equially distributed:\n", assets)
 
     weighted_yearly_ret = yearly_return.T * portfolio_weight
     print("\nWeighted yearly return:\n", weighted_yearly_ret)
-    print("\nReturn VS Volatility:\n", assets)
+    #print("\nDaily meanreturn:\n", daily_returns.mean())
+    calculate_efficient_frontier(listStocks, yearly_return, covariance, df)
 
+
+def calculate_efficient_frontier(listStocks, yearly_return, covariance, df):
     #5- create different portfolio variations
     portfolio_returns = [] #pd.DataFrame(columns=listStocks)
     portfolio_volatilities = [] #pd.DataFrame(columns=listStocks)
     portfolio_weights = [] #pd.DataFrame(columns=listStocks)
     portfolio_sharpe_ratio = []
-    nr_portfolios = 5000
+    nr_portfolios = 25000
     nr_assets = len(listStocks)
     index = 0
 
@@ -227,7 +271,7 @@ def method_2():
 
 
     portfolios = pd.DataFrame(data)
-    print("\nPortfolios:\n", portfolios)
+    print("\nPortfolios:\n", portfolios.head())
     #portfolios.plot.scatter(x="Volatility", y="Returns", marker="o", s=10, alpha=0.3, grid=True, figsize=[10,10])
     #portfolios.plot.scatter(x='Volatility', y='Returns', marker='o', s=10, alpha=0.3, grid=True, figsize=[10,10])
 
@@ -246,4 +290,4 @@ def method_2():
 
 
 #method_1()
-method_2()
+method_2("NN")
